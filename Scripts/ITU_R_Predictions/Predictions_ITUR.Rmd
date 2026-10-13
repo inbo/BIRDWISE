@@ -49,10 +49,10 @@ library(ggspatial) # for putting scale bar on plots
 library(leaflet) # for leaflet map visualisation
 library(htmlwidgets) # exporting visualization as html
 
-source("ITU_R_Predictions/Functions/get_dhmv_wcs.R")
+source("Input/ITU_R_Predictions/Functions/get_dhmv_wcs.R")
 
 # This is now your stable, local path
-env_path <- file.path(getwd(), "ITU_R_Predictions/python_env")
+env_path <- file.path(getwd(), "Input/ITU_R_Predictions/python_env")
 
 # Create the environment from scratch
 if (!virtualenv_exists(env_path)) {
@@ -76,7 +76,7 @@ use_virtualenv(env_path, required = TRUE)
 ## Check that the distance and study area are the same as prepared in "Preparatory_steps_ITUR_predictions.Rmd"
 
 # Study area
-sa <- read.csv("ITU_R_Predictions/Input/study_area.csv") %>%
+sa <- read.csv("Input/ITU_R_Predictions/Input/study_area.csv") %>%
   #filter(name == "MERELBEKE") # Choose which gateway location to simulate for
   #filter(name == "TIELT") 
   filter(name == "PC_FRUIT") 
@@ -112,7 +112,7 @@ dtm <- get_dhmv_wcs_tiled(
   tile_size = 2000)
   
 terra::writeRaster(dtm, 
-                   "ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif",
+                   "Input/ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif",
                    filetype = "GTiff",
                    overwrite = T)
 
@@ -176,7 +176,7 @@ grid_sf <- st_sf(geometry = grid)
 grid_sf$id <- 1:nrow(grid_sf)
 
 # Save grid to python data source
-st_write(grid_sf, "ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.shp", append = F)
+st_write(grid_sf, "Input/ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.shp", append = F)
 
 ```
 
@@ -230,7 +230,7 @@ simulation_params <- list(
 )
 
 # 3. Write the JSON
-write_json(simulation_params, "ITU_R_Predictions/Py1812-main/data/sim_settings.json", auto_unbox = TRUE, pretty = TRUE)
+write_json(simulation_params, "Input/ITU_R_Predictions/Py1812-main/data/sim_settings.json", auto_unbox = TRUE, pretty = TRUE)
 
 ```
 
@@ -244,7 +244,7 @@ Now lets run the python script using all of the data prepared here.
 pre_python_env <- ls()
 
 # Using here::here() is the gold standard for GitHub portability
-base_path <- here::here("ITU_R_Predictions/Py1812-main")
+base_path <- here::here("Input/ITU_R_Predictions/Py1812-main")
 
 # 1. Prepare Python environment
 py_run_string(paste0("import sys; sys.path.append('", base_path, "/src')"))
@@ -256,7 +256,7 @@ source_python(file.path(base_path, "heatmap_builder_R.py"))
 # 3. Clean up R's memory (optional)
 rm(list=setdiff(ls(), pre_python_env))
 
-unlink("ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif")
+unlink("Input/ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif")
 
 ```
 
@@ -269,26 +269,26 @@ Since even the .zip folder of this specific case is too large for Github, we rem
 # Download .zip folder in Github/BIRDWISE/ITU_R_Predictions/Intermediate
 
 # First unzip the results
-unzip(paste0("ITU_R_Predictions/Intermediate/", output_name, ".zip"),
-      exdir = paste0("ITU_R_Predictions/Intermediate/", output_name))
+unzip(paste0("vITU_R_Predictions/Intermediate/", output_name, ".zip"),
+      exdir = paste0("Input/ITU_R_Predictions/Intermediate/", output_name))
 
 # Gateways
-gateways <- st_read(paste0("ITU_R_Predictions/Intermediate/", output_name, "/", output_name, "_gws.shp"))
+gateways <- st_read(paste0("Input/ITU_R_Predictions/Intermediate/", output_name, "/", output_name, "_gws.shp"))
 
 # Predictions
-pred_csv <- read.csv(paste0("ITU_R_Predictions/Intermediate/", output_name, "/", output_name, ".csv")) %>%
+pred_csv <- read.csv(paste0("Input/ITU_R_Predictions/Intermediate/", output_name, "/", output_name, ".csv")) %>%
   filter(sf12_ok != 0)
 
-meta <- jsonlite::fromJSON(paste0("ITU_R_Predictions/Intermediate/", output_name, "/metadata.json"))
+meta <- jsonlite::fromJSON(paste0("Input/ITU_R_Predictions/Intermediate/", output_name, "/metadata.json"))
 
 # Grid
-grid_sf <- read_sf("ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.shp")
+grid_sf <- read_sf("Input/ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.shp")
 
 # studysite intersection to remove all the rest
 grid_sf <- st_intersection(grid_sf, sa_sf)
 
 # cleanup
-unlink(paste0("ITU_R_Predictions/Intermediate/", output_name), recursive = T)
+unlink(paste0("Input/ITU_R_Predictions/Intermediate/", output_name), recursive = T)
 
 ```
 
@@ -359,91 +359,10 @@ p1 <- ggplot() +
                   )
 
 # Save the plot to a correct location based on its output name
-ggsave(paste0("ITU_R_Predictions/Output/", output_name, ".png"),
+ggsave(paste0("Output/ITU_R_Predictions/", output_name, ".png"),
        plot = p1,
        width = 12, height = 8, dpi = 600)
 
-
-```
-
-# Other visualizations
-
-```{r Other visualizations}
-library(ggmap)
-
-# Register your Google API key once
-register_google(key = "AIzaSyACdSg_xkX_gdKzSQiZQETStjEDOC_HVZg")
-
-# 1. Reproject data to WGS 84
-sa_sf_wgs       <- st_transform(sa_sf, 4326)
-cell_summary_wgs <- st_transform(cell_summary, 4326)
-gateways_wgs     <- st_transform(gateways, 4326)
-
-# 2. Get the bounding box of your region
-bbox <- st_bbox(sa_sf_wgs)
-names(bbox) <- c("left", "bottom", "right", "top")
-
-# 3. Fetch Google Map tile ("roadmap", "satellite", "terrain", or "hybrid")
-gmap <- get_googlemap(
-  center = c(lon = mean(bbox[c("left", "right")]), lat = mean(bbox[c("bottom", "top")])),
-  zoom = 13,
-  maptype = "hybrid"
-)
-
-# 4. Plot using ggmap() as the base
-p2 <- ggmap(gmap) +
-  geom_sf(data = cell_summary_wgs, aes(fill = best_sf), alpha = 0.6, color = NA, inherit.aes = FALSE) +
-  geom_sf_label(data = gateways_wgs, aes(label = id), size = 2, inherit.aes = FALSE) +
-  ggspatial::annotation_scale(
-    location = "br",
-    width_hint = 0.15,
-    unit_category = "metric",
-    bar_cols = c("white", "white"),
-    text_col = "white",
-    line_col = "white",
-    pad_x = grid::unit(0.5, "cm"),
-    pad_y = grid::unit(0.5, "cm")
-  )+
-  scale_fill_manual(values = colorRampPalette(c("blue3", "darkorange"))(6), name = "Best SF") +
-  # scale_color_manual(values = colorRampPalette(c("blue3", "darkorange"))(6), name = "Best SF") +
-  coord_sf(crs = st_crs(4326)) + # Ensure correct spatial alignment
-  theme_minimal() +
-  labs(title = "Best Available Spreading Factor")
-
-p2
-
-# Using mapview
-
-# Define the same color palette (6 colors)
-sf_colors <- colorRampPalette(c("blue3", "darkorange"))(6)
-
-# Build and combine layers
-map_out <- mapview(
-    sa_sf, 
-    col.regions = "white", 
-    alpha.regions = 0.1, 
-    color = "grey50", 
-    legend = FALSE,
-    layer.name = "Study Area",
-    map.type = "OpenStreetMap"
-  ) +
-  mapview(
-    cell_summary, 
-    zcol = "best_sf", 
-    col.regions = sf_colors, 
-    alpha.regions = 0.6,
-    layer.name = "Best SF"
-  ) +
-  mapview(
-    gateways, 
-    label = "id",
-    col.regions = "black", 
-    cex = 5, 
-    layer.name = "Gateways"
-  )
-
-# Display the map
-map_out
 
 ```
 
@@ -614,7 +533,7 @@ export_map_html <- function(widget, file) {
 export_map_html(
   widget = map_out,
   file = paste0(
-    "ITU_R_Predictions/Output/",
+    "Output/ITU_R_Predictions/",
     output_name,
     "_Simulatie.html"
   )
@@ -629,11 +548,11 @@ export_map_html(
 ```{r cleanup}
 
 # Cleanup
-unlink(paste0("ITU_R_Predictions/Intermediate/", output_name),
+unlink(paste0("Input/ITU_R_Predictions/Intermediate/", output_name),
        recursive = T)
 
 # Remove files too large for github
-unlink("ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif",
+unlink("Input/ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif",
        recursive = T)
 
 ```
