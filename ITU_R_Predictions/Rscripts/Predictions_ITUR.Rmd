@@ -77,13 +77,13 @@ sa <- read.csv("ITU_R_Predictions/Input/study_area.csv") %>%
   filter(name == "MERELBEKE") # Choose which gateway location to simulate for
 
 # Distance for the simulation (in meter and currently minimally 2000)
-sim_dist <- 5000
+sim_dist <- 15000
 
 # Gateway antenna gain (hardware specification)
 gw_antenna_db <- 5
 
 # Gateway height (in meter)
-gw_height <- 7
+gw_height <- 14
 
 ```
 
@@ -118,7 +118,7 @@ terra::writeRaster(dtm,
 ```{r ITU R specifications}
 
 # Sensor specifications
-sensor_height = 1 
+sensor_height = 10 
 antenna_gain_sensor = 2.0 
 transmission_power = 6.0
 
