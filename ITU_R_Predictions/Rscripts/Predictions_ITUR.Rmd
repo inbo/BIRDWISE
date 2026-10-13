@@ -103,7 +103,7 @@ sa_sf <- st_as_sf(
 dtm <- get_dhmv_wcs_tiled(
   "DHMVII_DTM_1m", 
   st_bbox(sa_sf),
-  resolution = 1,
+  resolution = 10,
   tile_size = 2000)
   
 terra::writeRaster(dtm, 
