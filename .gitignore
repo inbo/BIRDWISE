@@ -48,3 +48,13 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# python_env
+\python_env
+ITU_R_Predictions/Py1812-main/data/bwk_calibrated.gpkg
+ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif
+ITU_R_Predictions/Py1812-main/data/sim_settings.json
+ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.dbf
+ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.prj
+ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.shp
+ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.shx
