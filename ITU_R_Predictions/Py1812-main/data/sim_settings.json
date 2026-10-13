@@ -1,9 +1,9 @@
 {
   "gateways": [
     {
-      "id": "TIELT",
-      "x": 85293.3008,
-      "y": 189379.349,
+      "id": "PC_FRUIT",
+      "x": 205857.9606,
+      "y": 162782.9055,
       "height": 14
     }
   ],
@@ -33,6 +33,6 @@
     "grid_cell_size": 250
   },
   "output": {
-    "output_name": "TIELT"
+    "output_name": "PC_FRUIT"
   }
 }

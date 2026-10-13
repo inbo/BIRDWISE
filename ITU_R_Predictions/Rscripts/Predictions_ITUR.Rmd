@@ -78,7 +78,8 @@ use_virtualenv(env_path, required = TRUE)
 # Study area
 sa <- read.csv("ITU_R_Predictions/Input/study_area.csv") %>%
   #filter(name == "MERELBEKE") # Choose which gateway location to simulate for
-  filter(name == "TIELT") 
+  #filter(name == "TIELT") 
+  filter(name == "PC_FRUIT") 
 
 # Distance for the simulation (in meter and currently minimally 2000)
 sim_dist <- 15000
@@ -261,11 +262,11 @@ unlink("ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif")
 
 # First look at results
 
-Since even the .zip folder of this specific case is too large for Github, we moved it (manually) to the MS Sharepoint. Hence, we will first have to download the .zip folder, unzip it and read both gateway locations and predictions.
+Since even the .zip folder of this specific case is too large for Github, we removed it
 
 ```{r read results}
 
-# Download .zip folder from MS Sharepoint and place in Github/BIRDWISE/ITU_R_Predictions/Intermediate
+# Download .zip folder in Github/BIRDWISE/ITU_R_Predictions/Intermediate
 
 # First unzip the results
 unzip(paste0("ITU_R_Predictions/Intermediate/", output_name, ".zip"),
