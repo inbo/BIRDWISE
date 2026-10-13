@@ -1,7 +1,7 @@
 # BIRDWISE
 Data verwerking van het BIRDWISE project
 
-Mappenstructuur
+**Mappenstructuur**
 
 Input/ — Invoergegevens voor de analyses, zoals vogeltellingen, schademetingen, ruimtelijke gegevens en informatie over beheermaatregelen.
 
