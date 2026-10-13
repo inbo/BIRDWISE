@@ -24,9 +24,11 @@ source("ITU_R_Predictions/Functions/get_dhmv_wcs.R")
 # Study area
 sa <- read.csv("ITU_R_Predictions/Input/study_area.csv") %>%
   filter(name == "MERELBEKE") # Choose which gateway location to simulate for
+ # filter(name == "TIELT") 
+ # filter(name == "PC_FRUIT") 
 
 # Distance for the simulation (in meter and currently minimally 2000)
-sim_dist <- 5000
+sim_dist <- 15000
 
 ```
 
@@ -49,14 +51,14 @@ bbox_data <- sa_sf %>%
 dtm <- get_dhmv_wcs_tiled(
   "DHMVII_DTM_1m", 
   bbox_data,
-  resolution = 1,
+  resolution = 10,
   tile_size = 2000)
 
 # Digital Surface Model
 dsm <- get_dhmv_wcs_tiled(
   "DHMVII_DSM_1m", 
   bbox_data,
-  resolution = 1,
+  resolution = 10,
   tile_size = 2000)
 
 # Biologische WaarderingsKaart
