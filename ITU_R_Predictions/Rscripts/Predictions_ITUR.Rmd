@@ -77,7 +77,8 @@ use_virtualenv(env_path, required = TRUE)
 
 # Study area
 sa <- read.csv("ITU_R_Predictions/Input/study_area.csv") %>%
-  filter(name == "MERELBEKE") # Choose which gateway location to simulate for
+  #filter(name == "MERELBEKE") # Choose which gateway location to simulate for
+  filter(name == "TIELT") 
 
 # Distance for the simulation (in meter and currently minimally 2000)
 sim_dist <- 15000
@@ -554,6 +555,25 @@ map_out <- map_out |>
     lat1 = as.numeric(bb["ymin"]),
     lng2 = as.numeric(bb["xmax"]),
     lat2 = as.numeric(bb["ymax"])
+  )
+
+simulation_info <- paste0(
+  "<div style='background: white; padding: 10px 14px;
+               border-radius: 5px; font-size: 13px;'>",
+  "<b>Simulation: ",
+  htmltools::htmlEscape(as.character(meta$run_info$name)),
+  "</b><br>",
+  "Gateway height: ", meta$parameters$gateways$height, " m<br>",
+  "Gateway antenna gain: ",
+  meta$parameters$hardware$antenna_gain_gw, " dB<br>",
+  "Sensor height: ", meta$parameters$sensor$height, " m",
+  "</div>"
+)
+
+map_out <- map_out |>
+  leaflet::addControl(
+    html = htmltools::HTML(simulation_info),
+    position = "topleft"
   )
 
 # 5. Display

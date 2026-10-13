@@ -1,9 +1,9 @@
 {
   "gateways": [
     {
-      "id": "MERELBEKE",
-      "x": 107262.1319,
-      "y": 183706.4085,
+      "id": "TIELT",
+      "x": 85293.3008,
+      "y": 189379.349,
       "height": 14
     }
   ],
@@ -33,6 +33,6 @@
     "grid_cell_size": 250
   },
   "output": {
-    "output_name": "MERELBEKE"
+    "output_name": "TIELT"
   }
 }
