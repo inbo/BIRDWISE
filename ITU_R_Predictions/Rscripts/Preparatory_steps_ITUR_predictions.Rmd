@@ -1,0 +1,109 @@
+---
+title: "Preparatory_steps_ITUR_predictions"
+author: "Siebe Indestege"
+date: "2026-04-03"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+
+# Libraries
+
+library(dplyr)
+library(sf)
+library(terra)
+library(ggplot2)
+library(mapview)
+
+source("ITU_R_Predictions/Functions/get_dhmv_wcs.R")
+
+### Simple things to change as inputs
+
+# Study area
+sa <- read.csv("ITU_R_Predictions/Input/study_area.csv") %>%
+  filter(name == "MERELBEKE") # Choose which gateway location to simulate for
+
+# Distance for the simulation (in meter and currently minimally 2000)
+sim_dist <- 5000
+
+```
+
+```{r height models}
+
+# transform to SF
+sa_sf <- st_as_sf(
+  sa,
+  coords = c("lon","lat"),
+  crs = 4326) %>%
+  st_transform(crs = 31370) %>%
+  # Radius of 5 km
+  st_buffer(dist = sim_dist)
+
+# Create bbox around study area
+bbox_data <- sa_sf %>%
+  st_bbox()
+
+# Digital Terrain Model
+dtm <- get_dhmv_wcs_tiled(
+  "DHMVII_DTM_1m", 
+  bbox_data,
+  resolution = 1,
+  tile_size = 2000)
+
+# Digital Surface Model
+dsm <- get_dhmv_wcs_tiled(
+  "DHMVII_DSM_1m", 
+  bbox_data,
+  resolution = 1,
+  tile_size = 2000)
+
+# Biologische WaarderingsKaart
+bwk <- read_sf(
+  paste0(
+    "https://geo.api.vlaanderen.be/BWK/wfs?",
+    "service=WFS&version=1.1.0&request=GetFeature",
+    "&typeName=BWK:Bwkhab",
+    "&outputFormat=application/json",
+    "&srsName=EPSG:31370",
+    "&bbox=", paste(bbox_data[c("xmin","ymin","xmax","ymax")], collapse = ","), ",EPSG:31370"
+  )
+)
+
+# mapview(dtm)
+plot(dtm)
+plot(st_centroid(sa_sf), add = T)
+```
+
+# Make new bwk heights file
+
+```{r bwk calibrated}
+
+# Calculate difference height between dsm and dtm
+hdm <- dsm - dtm
+hdm[hdm < 0] <- 0 # make lowest value 0
+
+# Crop bkw to bbox of nphk
+bwk_height_prep <- st_crop(bwk, bbox_data)
+
+# Extract 90 percentile height for every polygon in the bwk data
+bwk_heights <- terra::extract(hdm, vect(bwk_height_prep), fun = function(x) max(x, na.rm=TRUE))
+
+# Assign each polygon with the respective 90 percentile height
+bwk_height_prep$calib_h <- bwk_heights[,2]
+bwk_height_prep$calib_h[is.na(bwk_height_prep$calib_h)] <- 0 # Fill empty with 0
+
+```
+
+# Save data
+
+```{r save data}
+
+# Save 
+st_write(bwk_height_prep, "ITU_R_Predictions/Py1812-main/data/bwk_calibrated.gpkg",
+         append = F)
+
+```
+
+
