@@ -17,12 +17,12 @@ library(terra)
 library(ggplot2)
 library(mapview)
 
-source("ITU_R_Predictions/Functions/get_dhmv_wcs.R")
+source("Input/ITU_R_Predictions/Functions/get_dhmv_wcs.R")
 
 ### Simple things to change as inputs
 
 # Study area
-sa <- read.csv("ITU_R_Predictions/Input/study_area.csv") %>%
+sa <- read.csv("Input/ITU_R_Predictions/Input/study_area.csv") %>%
   #filter(name == "MERELBEKE") # Choose which gateway location to simulate for
   #filter(name == "TIELT") 
   filter(name == "PC_FRUIT") 
@@ -103,7 +103,7 @@ bwk_height_prep$calib_h[is.na(bwk_height_prep$calib_h)] <- 0 # Fill empty with 0
 ```{r save data}
 
 # Save 
-st_write(bwk_height_prep, "ITU_R_Predictions/Py1812-main/data/bwk_calibrated.gpkg",
+st_write(bwk_height_prep, "Input/ITU_R_Predictions/Py1812-main/data/bwk_calibrated.gpkg",
          append = F)
 
 ```
