@@ -1,14 +1,14 @@
 {
   "gateways": [
     {
-      "id": "PCFRUIT",
-      "x": 205857.9606,
-      "y": 162782.9055,
+      "id": "MERELBEKE",
+      "x": 107262.1319,
+      "y": 183706.4085,
       "height": 14
     }
   ],
   "sensor": {
-    "height": 15,
+    "height": 10,
     "antenna_gain": 2,
     "tx_power": 6
   },
@@ -33,6 +33,6 @@
     "grid_cell_size": 250
   },
   "output": {
-    "output_name": "PCFRUIT"
+    "output_name": "MERELBEKE"
   }
 }
