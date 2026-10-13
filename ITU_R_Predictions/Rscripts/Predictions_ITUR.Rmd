@@ -1,0 +1,640 @@
+---
+title: "Prediction_ITUR"
+author: "Siebe Indestege"
+date: "2026-03-30"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# Prediction ITU R 1812 model 
+
+This script uses the ITU R 1812 model to make predictions on whether a location is covered by LoRa from a certain gateway location. The model is written in python code (https://github.com/eeveetza/Py1812), hence this script makes the input for the python script and reads the output of the python script using R.
+The model uses several sources of input:
+- Height:
+  - DTM: Digital terrain model to estimate landscape heights along connectivity distances
+  - Heights of vegetation: Estimate per BWK polygon (calculated in preparatory_steps_ITUR_predictions.Rmd)
+  - Gateway heights
+  - Sensor node heights
+- Hardware specifications:
+  - Sensor: 
+    - Antenna Gain
+    - Transmission power
+  - Gateway:
+    - Antenna Gain
+    - Cable loss
+    - Sensitivity per Spreading Factor 
+- Other model specifications:
+  - Frequency (always 868 MHz for European LoRa)
+  - Percentage of time transmission loss not exceeded
+  - Percentage of location transmission loss not exceeded
+  - Distance_interval: Interval in which to take "steps" along the connection distance (smaller = better but more computational intensive)
+
+All input for the python script is should be put in "ITU_R_Predictions/Py1812-main/data".
+The correct preparations to run this script are done in "ITU_R_Predictions/Rscripts/Preparatory_steps_ITUR_predictions.Rmd" --> Be sure to run this script before this one (with the same parameters!)
+The eventual output can be found in "ITU_R_Predictions/Intermediate/".
+
+
+```{r data & libraries, include=FALSE}
+
+library(ggplot2) # Plotting
+library(mapview) # Spatial exploration
+library(dplyr) # Data wrangling
+library(sf) # Spatial handling
+library(fistools) # Google drive function
+library(jsonlite) # JSON file writer
+library(reticulate) # Python connection
+library(patchwork) # For putting plots side-by-side
+library(ggspatial) # for putting scale bar on plots
+library(leaflet) # for leaflet map visualisation
+library(htmlwidgets) # exporting visualization as html
+
+source("ITU_R_Predictions/Functions/get_dhmv_wcs.R")
+
+# This is now your stable, local path
+env_path <- file.path(getwd(), "ITU_R_Predictions/python_env")
+
+# Create the environment from scratch
+if (!virtualenv_exists(env_path)) {
+  virtualenv_create(env_path)
+  virtualenv_install(env_path, packages = c(
+    "numpy", 
+    "pandas", 
+    "geopandas", 
+    "rasterio", 
+    "tqdm", 
+    "shapely", 
+    "pyproj"
+  ))
+}
+
+# Point R to the new local engine
+use_virtualenv(env_path, required = TRUE)
+
+
+### Simple things to change as inputs
+## Check that the distance and study area are the same as prepared in "Preparatory_steps_ITUR_predictions.Rmd"
+
+# Study area
+sa <- read.csv("ITU_R_Predictions/Input/study_area.csv") %>%
+  #filter(name == "MERELBEKE") # Choose which gateway location to simulate for
+  #filter(name == "TIELT") 
+  filter(name == "PC_FRUIT") 
+
+# Distance for the simulation (in meter and currently minimally 2000)
+sim_dist <- 15000
+
+# Gateway antenna gain (hardware specification)
+gw_antenna_db <- 5
+
+# Gateway height (in meter)
+gw_height <- 14
+
+```
+
+We need the Digital Terrain Model of our study area, but since this is too large for local saving or on Github, we work with WCS service to just download the necessary tiles
+
+```{r get spatial data}
+
+sa_sf <- st_as_sf(
+  sa,
+  coords = c("lon","lat"),
+  crs = 4326) %>%
+  st_transform(crs = 31370) %>%
+  # Radius of 5 km
+  st_buffer(dist = sim_dist)
+
+# Download the digital terrain model in case it is missing (too large for Github)
+dtm <- get_dhmv_wcs_tiled(
+  "DHMVII_DTM_1m", 
+  st_bbox(sa_sf),
+  resolution = 10,
+  tile_size = 2000)
+  
+terra::writeRaster(dtm, 
+                   "ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif",
+                   filetype = "GTiff",
+                   overwrite = T)
+
+```
+
+# Specify all parameters for the ITU R model
+
+```{r ITU R specifications}
+
+# Sensor specifications
+sensor_height = 10 
+antenna_gain_sensor = 2.0 
+transmission_power = 6.0
+
+# Gateway hardware specifications
+antenna_gain_gateway = gw_antenna_db
+cable_loss_gateway = 2.0
+
+# Spreading factor limits
+sf7_sens = -123 
+sf8_sens = -126
+sf9_sens = -129
+sf10_sens = -132
+sf11_sens = -134.5
+sf12_sens = -137
+
+# General specifications
+#grid_cell_size = 30
+grid_cell_size = 250
+grid_square = F
+lora_frequency = 0.868
+percentage_time = 50
+percentage_locations = 95
+#interval_evaluation = 20
+interval_evaluation = 100
+
+# Specific characteristics
+output_name = sa[1,1] # Change this if multiple are in one file
+specific_gateways = T
+
+```
+
+# Create hexagonal grid over national park
+We use hexagonal grids to limit corner effects
+The LoRa connectivity will be estimated for each single grid cell, hence decreasing cell size increases computation time.
+
+```{r grid creation}
+
+# Make a grid of xxx by xxx meters (hexagonal to limit corner effects)
+grid <- st_make_grid(sa_sf, cellsize = c(grid_cell_size, grid_cell_size), square = grid_square)
+
+# Visualization
+ggplot() +
+ geom_sf(data = grid) +
+ geom_sf(data = sa_sf, col = "blue", fill = NA)
+
+# Transform the grid into an sf object
+grid_sf <- st_sf(geometry = grid)
+
+# Give each cell of the grid an identicator
+grid_sf$id <- 1:nrow(grid_sf)
+
+# Save grid to python data source
+st_write(grid_sf, "ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.shp", append = F)
+
+```
+
+# Specify all necessary input for ITU R model
+Here we specify all the necessary input that the python script needs to fuel the ITU R model. The gateways_list is only necessary when we want to specify specific gateways.
+All others are dependent on the hardware of sensors and gateways, and specific conditions.
+
+```{r gateway locations}
+
+x <- st_centroid(sa_sf)[[2]][[1]][1]
+y <- st_centroid(sa_sf)[[2]][[1]][2]
+
+# 1. Define a list of Gateways
+gateways_list <- list(
+ list(id = output_name, x = x, y = y, height = gw_height))
+
+# 2. Add them to the global settings
+simulation_params <- list(
+ # Gateway locations and heights
+ gateways = gateways_list,
+ 
+ # Sensor specifications
+ sensor = list(
+   height = sensor_height, 
+   antenna_gain = antenna_gain_sensor, 
+   tx_power = transmission_power),
+
+ # Hardware specifications of gateway
+ hardware = list(
+   antenna_gain_gw = antenna_gain_gateway, 
+   cable_loss_gw = cable_loss_gateway, 
+   sensitivity_sf7 = sf7_sens, 
+   sensitivity_sf8 = sf8_sens, 
+   sensitivity_sf9 = sf9_sens, 
+   sensitivity_sf10 = sf10_sens, 
+   sensitivity_sf11 = sf11_sens, 
+   sensitivity_sf12 = sf12_sens), # Based on The Things Network
+
+ # Other model specifications
+ model = list(
+   max_dist = sim_dist,
+   freq_GHz = lora_frequency, 
+   time_percentage = percentage_time, 
+   loc_percentage = percentage_locations, 
+   distance_interval = interval_evaluation),
+ 
+ grid_size = list(grid_cell_size = grid_cell_size),
+ 
+ # Output specifications
+ output = list(output_name = output_name)
+)
+
+# 3. Write the JSON
+write_json(simulation_params, "ITU_R_Predictions/Py1812-main/data/sim_settings.json", auto_unbox = TRUE, pretty = TRUE)
+
+```
+
+# Python script
+Now lets run the python script using all of the data prepared here.
+(Be careful however, this script will have to evaluate +- 800 000 cells, taking up to three days) --> REDUCED IN THE CURRENT VERSION
+
+```{r python ITU-R model, include=FALSE}
+
+# Keep environment from before python
+pre_python_env <- ls()
+
+# Using here::here() is the gold standard for GitHub portability
+base_path <- here::here("ITU_R_Predictions/Py1812-main")
+
+# 1. Prepare Python environment
+py_run_string(paste0("import sys; sys.path.append('", base_path, "/src')"))
+
+# 2. Run the simulation
+# We use source_python, but reticulate now handles the environment automatically
+source_python(file.path(base_path, "heatmap_builder_R.py"))
+
+# 3. Clean up R's memory (optional)
+rm(list=setdiff(ls(), pre_python_env))
+
+unlink("ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif")
+
+```
+
+# First look at results
+
+Since even the .zip folder of this specific case is too large for Github, we removed it
+
+```{r read results}
+
+# Download .zip folder in Github/BIRDWISE/ITU_R_Predictions/Intermediate
+
+# First unzip the results
+unzip(paste0("ITU_R_Predictions/Intermediate/", output_name, ".zip"),
+      exdir = paste0("ITU_R_Predictions/Intermediate/", output_name))
+
+# Gateways
+gateways <- st_read(paste0("ITU_R_Predictions/Intermediate/", output_name, "/", output_name, "_gws.shp"))
+
+# Predictions
+pred_csv <- read.csv(paste0("ITU_R_Predictions/Intermediate/", output_name, "/", output_name, ".csv")) %>%
+  filter(sf12_ok != 0)
+
+meta <- jsonlite::fromJSON(paste0("ITU_R_Predictions/Intermediate/", output_name, "/metadata.json"))
+
+# Grid
+grid_sf <- read_sf("ITU_R_Predictions/Py1812-main/data/study_area_hex_grid.shp")
+
+# studysite intersection to remove all the rest
+grid_sf <- st_intersection(grid_sf, sa_sf)
+
+# cleanup
+unlink(paste0("ITU_R_Predictions/Intermediate/", output_name), recursive = T)
+
+```
+
+# Processing of data
+Instead of plotting the six different spreading factor layers on top eachother, we will first create a new single layer where each unique cell is one row provided with a the best SF reaching this cell and the amount of gateways
+
+```{r results processing}
+
+# Just as an indication: How much of the study site is covered?
+n_distinct(pred_csv[pred_csv$cell_id %in% grid_sf$id,]$cell_id) / n_distinct(grid_sf$id) *100
+
+# First aggregate the data to reduce difficulty of calculation
+# This turns 400k rows into ~80k rows (one per unique cell)
+cell_summary <- pred_csv %>%
+  group_by(cell_id) %>%
+  summarize(
+    # Count how many rows (gateways) had succesfull sf12 connection
+    gw_count = sum(sf12_ok == 1),
+    
+    # Logic to find the best SF across ALL gateways for this cell
+    # we use max() on the _ok columns to see if ANY gateway reached it
+    sf7_any  = max(sf7_ok),
+    sf8_any  = max(sf8_ok),
+    sf9_any  = max(sf9_ok),
+    sf10_any = max(sf10_ok),
+    sf11_any = max(sf11_ok),
+    sf12_any = max(sf12_ok),
+    
+  ) %>%
+  # Filter out cells with zero coverage
+  filter(gw_count > 0) %>%
+  # Determine the best SF label
+  mutate(best_sf = case_when(
+    sf7_any  == 1 ~ "SF7",
+    sf8_any  == 1 ~ "SF8",
+    sf9_any  == 1 ~ "SF9",
+    sf10_any == 1 ~ "SF10",
+    sf11_any == 1 ~ "SF11",
+    sf12_any == 1 ~ "SF12"
+  )) %>%
+  mutate(best_sf = factor(best_sf, levels = c("SF7", "SF8", "SF9", "SF10", "SF11", "SF12")),
+         gw_count = factor(gw_count, levels = c("5", "4", "3", "2", "1")))  %>%
+  inner_join(x = grid_sf, by = c("id" = "cell_id"))
+
+
+# --- 2. PLOT A: BEST SF ---
+p1 <- ggplot() +
+  geom_sf(data = sa_sf, fill = "white", color = "grey80") +
+  geom_sf(data = cell_summary, aes(fill = best_sf, color = best_sf)) +
+  geom_sf_label(data = gateways, aes(label = id), size = 2) +
+  scale_fill_manual(values = colorRampPalette(c("blue3", "darkorange"))(6), name = "Best SF") +
+  scale_color_manual(values = colorRampPalette(c("blue3", "darkorange"))(6), name = "Best SF") +
+  ggspatial::annotation_scale(
+    location = "bl",       
+    width_hint = 0.18,
+    unit_category = "metric",
+    bar_cols = c("black", "black"),
+    pad_x = grid::unit(0.5, "cm"),
+    pad_y = grid::unit(0.5, "cm")
+  ) +
+  theme_minimal() +
+  labs(title = "Best Available Spreading Factor") +
+  plot_annotation(title = paste("Simulation:", meta$run_info$name),
+                  subtitle = paste("Gateway height of ", meta$parameters$gateways$height, " m & antenna gain of ", meta$parameters$hardware$antenna_gain_gw, " dB & sensor height of", meta$parameters$sensor$height," m"),
+                  theme = theme(
+                    plot.title = element_text(hjust = 0.5, vjust = 0.30, size = 20),
+                    plot.subtitle = element_text(hjust = 0.5, vjust = 0.25))
+                  )
+
+# Save the plot to a correct location based on its output name
+ggsave(paste0("ITU_R_Predictions/Output/", output_name, ".png"),
+       plot = p1,
+       width = 12, height = 8, dpi = 600)
+
+
+```
+
+# Other visualizations
+
+```{r Other visualizations}
+library(ggmap)
+
+# Register your Google API key once
+register_google(key = "AIzaSyACdSg_xkX_gdKzSQiZQETStjEDOC_HVZg")
+
+# 1. Reproject data to WGS 84
+sa_sf_wgs       <- st_transform(sa_sf, 4326)
+cell_summary_wgs <- st_transform(cell_summary, 4326)
+gateways_wgs     <- st_transform(gateways, 4326)
+
+# 2. Get the bounding box of your region
+bbox <- st_bbox(sa_sf_wgs)
+names(bbox) <- c("left", "bottom", "right", "top")
+
+# 3. Fetch Google Map tile ("roadmap", "satellite", "terrain", or "hybrid")
+gmap <- get_googlemap(
+  center = c(lon = mean(bbox[c("left", "right")]), lat = mean(bbox[c("bottom", "top")])),
+  zoom = 13,
+  maptype = "hybrid"
+)
+
+# 4. Plot using ggmap() as the base
+p2 <- ggmap(gmap) +
+  geom_sf(data = cell_summary_wgs, aes(fill = best_sf), alpha = 0.6, color = NA, inherit.aes = FALSE) +
+  geom_sf_label(data = gateways_wgs, aes(label = id), size = 2, inherit.aes = FALSE) +
+  ggspatial::annotation_scale(
+    location = "br",
+    width_hint = 0.15,
+    unit_category = "metric",
+    bar_cols = c("white", "white"),
+    text_col = "white",
+    line_col = "white",
+    pad_x = grid::unit(0.5, "cm"),
+    pad_y = grid::unit(0.5, "cm")
+  )+
+  scale_fill_manual(values = colorRampPalette(c("blue3", "darkorange"))(6), name = "Best SF") +
+  # scale_color_manual(values = colorRampPalette(c("blue3", "darkorange"))(6), name = "Best SF") +
+  coord_sf(crs = st_crs(4326)) + # Ensure correct spatial alignment
+  theme_minimal() +
+  labs(title = "Best Available Spreading Factor")
+
+p2
+
+# Using mapview
+
+# Define the same color palette (6 colors)
+sf_colors <- colorRampPalette(c("blue3", "darkorange"))(6)
+
+# Build and combine layers
+map_out <- mapview(
+    sa_sf, 
+    col.regions = "white", 
+    alpha.regions = 0.1, 
+    color = "grey50", 
+    legend = FALSE,
+    layer.name = "Study Area",
+    map.type = "OpenStreetMap"
+  ) +
+  mapview(
+    cell_summary, 
+    zcol = "best_sf", 
+    col.regions = sf_colors, 
+    alpha.regions = 0.6,
+    layer.name = "Best SF"
+  ) +
+  mapview(
+    gateways, 
+    label = "id",
+    col.regions = "black", 
+    cex = 5, 
+    layer.name = "Gateways"
+  )
+
+# Display the map
+map_out
+
+```
+
+# Leaflet visualisation
+
+```{r}
+
+# 1. Reproject to WGS84
+sa_sf_wgs        <- st_transform(sa_sf, 4326)
+cell_summary_wgs <- st_transform(cell_summary, 4326)
+gateways_wgs     <- st_transform(gateways, 4326)
+
+# 2. Define the colours and SF categories
+sf_colors <- colorRampPalette(c("blue3", "darkorange"))(6)
+
+sf_levels <- levels(factor(cell_summary_wgs$best_sf))
+
+sf_pal <- colorFactor(
+  palette = sf_colors,
+  domain = sf_levels,
+  levels = sf_levels,
+  na.color = "#BDBDBD"
+)
+
+# 3. Get the study-area bounds
+bb <- st_bbox(sa_sf_wgs)
+
+# 4. Build the interactive map
+map_out <- leaflet(
+  options = leafletOptions(preferCanvas = TRUE),
+  height = 700
+) |>
+  addProviderTiles(
+    providers$OpenStreetMap.DE,
+    group = "OpenStreetMap.DE"
+  ) |>
+  addPolygons(
+    data = sa_sf_wgs,
+    color = "grey50",
+    weight = 1,
+    fillColor = "white",
+    fillOpacity = 0.1,
+    group = "Study Area"
+  )
+
+# Separate layer for each SF level
+sf_groups <- paste("Best SF:", sf_levels)
+
+for (i in seq_along(sf_levels)) {
+
+  sf_level <- sf_levels[i]
+
+  cells_subset <- cell_summary_wgs[
+    !is.na(cell_summary_wgs$best_sf) &
+      as.character(cell_summary_wgs$best_sf) == sf_level,
+  ]
+
+  if (nrow(cells_subset) == 0) next
+
+  map_out <- map_out |>
+    addPolygons(
+      data = cells_subset,
+      fillColor = sf_pal(sf_level),
+      fillOpacity = 0.6,
+      stroke = FALSE,
+      label = ~paste("Best SF:", best_sf),
+      popup = ~paste0("<b>Best SF:</b> ", best_sf),
+      group = sf_groups[i],
+      highlightOptions = highlightOptions(
+        weight = 2,
+        color = "white",
+        bringToFront = TRUE
+      )
+    )
+}
+
+# Add gateways and map controls
+map_out <- map_out |>
+  addCircleMarkers(
+    data = gateways_wgs,
+    radius = 5,
+    color = "white",
+    weight = 1,
+    fillColor = "black",
+    fillOpacity = 1,
+    label = ~paste("Gateway:", id),
+    popup = ~paste0("<b>Gateway:</b> ", id),
+    group = "Gateways"
+  ) |>
+  addLegend(
+    position = "bottomright",
+    pal = sf_pal,
+    values = sf_levels,
+    title = "Best SF",
+    opacity = 1
+  ) |>
+  addScaleBar(
+    position = "bottomleft",
+    options = scaleBarOptions(
+      metric = TRUE,
+      imperial = FALSE
+    )
+  ) |>
+  addLayersControl(
+    overlayGroups = c("Study Area", sf_groups, "Gateways"),
+    options = layersControlOptions(collapsed = FALSE)
+  ) |>
+  fitBounds(
+    lng1 = as.numeric(bb["xmin"]),
+    lat1 = as.numeric(bb["ymin"]),
+    lng2 = as.numeric(bb["xmax"]),
+    lat2 = as.numeric(bb["ymax"])
+  )
+
+simulation_info <- paste0(
+  "<div style='background: white; padding: 10px 14px;
+               border-radius: 5px; font-size: 13px;'>",
+  "<b>Simulation: ",
+  htmltools::htmlEscape(as.character(meta$run_info$name)),
+  "</b><br>",
+  "Gateway height: ", meta$parameters$gateways$height, " m<br>",
+  "Gateway antenna gain: ",
+  meta$parameters$hardware$antenna_gain_gw, " dB<br>",
+  "Sensor height: ", meta$parameters$sensor$height, " m",
+  "</div>"
+)
+
+map_out <- map_out |>
+  leaflet::addControl(
+    html = htmltools::HTML(simulation_info),
+    position = "topleft"
+  )
+
+# 5. Display
+map_out
+
+# 6. Export as a single HTML file
+
+export_map_html <- function(widget, file) {
+
+  # Temporary directory, automatically cleaned up
+  tmp_dir <- tempfile("leaflet_export_")
+  dir.create(tmp_dir)
+  on.exit(unlink(tmp_dir, recursive = TRUE), add = TRUE)
+
+  tmp_html <- file.path(tmp_dir, "map.html")
+
+  # Embed dependencies inside the HTML
+  htmlwidgets::saveWidget(
+    widget = widget,
+    file = tmp_html,
+    selfcontained = TRUE,
+    libdir = file.path(tmp_dir, "dependencies"),
+    title = "Simulatie LoRaWAN Netwerk"
+  )
+
+  # Copy only the HTML to the final location
+  dir.create(dirname(file), recursive = TRUE, showWarnings = FALSE)
+
+  if (!file.copy(tmp_html, file, overwrite = TRUE)) {
+    stop("Could not copy the exported HTML to: ", file)
+  }
+
+  invisible(file)
+}
+
+  # Export
+export_map_html(
+  widget = map_out,
+  file = paste0(
+    "ITU_R_Predictions/Output/",
+    output_name,
+    "_Simulatie.html"
+  )
+)
+
+```
+
+
+
+# Clean up large files
+
+```{r cleanup}
+
+# Cleanup
+unlink(paste0("ITU_R_Predictions/Intermediate/", output_name),
+       recursive = T)
+
+# Remove files too large for github
+unlink("ITU_R_Predictions/Py1812-main/data/dtm_height_model.tif",
+       recursive = T)
+
+```
+

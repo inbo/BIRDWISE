@@ -1,0 +1,38 @@
+{
+  "gateways": [
+    {
+      "id": "PC_FRUIT",
+      "x": 205857.9606,
+      "y": 162782.9055,
+      "height": 14
+    }
+  ],
+  "sensor": {
+    "height": 10,
+    "antenna_gain": 2,
+    "tx_power": 6
+  },
+  "hardware": {
+    "antenna_gain_gw": 5,
+    "cable_loss_gw": 2,
+    "sensitivity_sf7": -123,
+    "sensitivity_sf8": -126,
+    "sensitivity_sf9": -129,
+    "sensitivity_sf10": -132,
+    "sensitivity_sf11": -134.5,
+    "sensitivity_sf12": -137
+  },
+  "model": {
+    "max_dist": 15000,
+    "freq_GHz": 0.868,
+    "time_percentage": 50,
+    "loc_percentage": 95,
+    "distance_interval": 100
+  },
+  "grid_size": {
+    "grid_cell_size": 250
+  },
+  "output": {
+    "output_name": "PC_FRUIT"
+  }
+}
