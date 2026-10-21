@@ -123,7 +123,7 @@ terra::writeRaster(dtm,
 ```{r ITU R specifications}
 
 # Sensor specifications
-sensor_height = 10 
+sensor_height = 1
 antenna_gain_sensor = 2.0 
 transmission_power = 6.0
 
@@ -359,7 +359,7 @@ p1 <- ggplot() +
                   )
 
 # Save the plot to a correct location based on its output name
-ggsave(paste0("Output/ITU_R_Predictions/", output_name, ".png"),
+ggsave(paste0("Output/ITU_R_Predictions/", output_name, "1m.png"),
        plot = p1,
        width = 12, height = 8, dpi = 600)
 
@@ -535,7 +535,7 @@ export_map_html(
   file = paste0(
     "Output/ITU_R_Predictions/",
     output_name,
-    "_Simulatie.html"
+    "_Simulatie_1m.html"
   )
 )
 
