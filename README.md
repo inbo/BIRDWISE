@@ -1,5 +1,5 @@
 # BIRDWISE
-Data verwerking van het BIRDWISE project
+Data verwerking van het BIRDWISE project. Dit is een public repository, gevoelige gegevens kunnen elders opgeslagen worden (vb. GDrive).
 
 **Mappenstructuur**
 
